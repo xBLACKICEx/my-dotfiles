@@ -1,0 +1,1 @@
+../../general/nushell/env.nu
