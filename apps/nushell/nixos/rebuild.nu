@@ -171,6 +171,7 @@ export def nrb [
   --accept-flake-config # Accept flake configuration prompts.
   --impure # Pass --impure to nixos-rebuild.
   --no-nom # Do not pipe internal-json logs through nom.
+  --verbose (-V) # Pass -v to nixos-rebuild when piping logs through nom.
   --dry-run (-n) # Print the command without running it.
 ] {
   let rebuild_target = (resolve-rebuild-target $target $action)
@@ -193,7 +194,13 @@ export def nrb [
   let runner = if $use_sudo { "sudo nixos-rebuild" } else { "nixos-rebuild" }
 
   let printable = if $use_nom {
-    $"(printable-command $runner $args) --log-format internal-json -v o+e>| nom --json"
+    let log_args = if $verbose {
+      ($args | append [--log-format internal-json -v])
+    } else {
+      ($args | append [--log-format internal-json])
+    }
+
+    $"(printable-command $runner $log_args) o+e>| nom --json"
   } else {
     printable-command $runner $args
   }
@@ -210,7 +217,11 @@ export def nrb [
   }
 
   if $use_nom {
-    let log_args = ($args | append [--log-format internal-json -v])
+    let log_args = if $verbose {
+      ($args | append [--log-format internal-json -v])
+    } else {
+      ($args | append [--log-format internal-json])
+    }
 
     if $use_sudo {
       ^sudo nixos-rebuild ...$log_args o+e>| ^nom --json

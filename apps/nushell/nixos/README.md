@@ -74,7 +74,7 @@ nrb HOST_NAME switch --specialisation gaming
 nrb server switch --build-host builder --target-host root@server --use-remote-sudo
 ```
 
-如果系统里有 `nom`，默认会用 `--log-format internal-json -v` 接到 `nom --json`。
+如果系统里有 `nom`，默认会用 `--log-format internal-json` 接到 `nom --json`。
 不想用时加：
 
 ```nu
