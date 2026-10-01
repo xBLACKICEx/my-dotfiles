@@ -1,0 +1,10 @@
+# Only offer Microsoft double pinyin, so existing schema history cannot
+# select another input scheme. The schema resets to Chinese and simplified.
+patch:
+  schema_list:
+    - schema: double_pinyin_mspy
+  # Do not restore a previously saved traditional-Chinese switch state.
+  switcher/save_options:
+    - full_shape
+    - ascii_punct
+    - extended_charset

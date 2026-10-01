@@ -45,7 +45,7 @@ EnumerateSkipFirst=False
 
 [Behavior]
 # 默认状态为激活
-ActiveByDefault=False
+ActiveByDefault=True
 # 共享输入状态
 ShareInputState=No
 # 在程序中显示预编辑文本
@@ -76,4 +76,3 @@ AllowInputMethodForPassword=False
 ShowPreeditForPassword=False
 # 保存用户数据的时间间隔（以分钟为单位）
 AutoSavePeriod=30
-
