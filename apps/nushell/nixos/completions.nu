@@ -1,3 +1,5 @@
+use ./common.nu [default_nix_config]
+
 export const nixos_rebuild_actions = [
   switch
   boot
@@ -6,13 +8,19 @@ export const nixos_rebuild_actions = [
   dry-build
 ]
 
+# Local flake URLs refer to directories. Keep the path: prefix in suggestions.
+def complete-local-flake-path [current: string] {
+  if not ($current | str starts-with "path:") {
+    return null
+  }
+  let partial_path = ($current | str substring 5..)
+  glob --no-file $"($partial_path)*"
+  | each {|directory| $"path:($directory)" }
+}
+
 export def complete-nixos-rebuild-actions [context: string] {
   if ($context | str starts-with "path:") {
-    let partial_path = ($context | str substring 5..)
-    return (
-      glob --no-file $"($partial_path)*"
-      | each {|match| $"path:($match)" }
-    )
+    return (complete-local-flake-path $context)
   }
 
   let actions = [
@@ -23,69 +31,46 @@ export def complete-nixos-rebuild-actions [context: string] {
     { value: "dry-build", description: "Show what would be built" }
   ]
 
-  if $context == "" {
-    return $actions
-  }
-
   $actions | where $it.value starts-with $context
 }
 
 # Complete input names and local `path:` URLs for nrb's `--override-input` pairs.
 export def complete-nixos-input-name [] {
-  open --raw /configs/nix-config/flake.lock
+  open --raw ($default_nix_config | path join "flake.lock")
   | from json
   | get nodes.root.inputs
   | columns
 }
 
 export def complete-nrb-override-input [spans: list<string>] {
-  let flag_index = (
-    $spans
+  # The final span is the word being completed, including an empty word after space.
+  let current = ($spans | last | default "")
+  let preceding_words = ($spans | drop 1)
+  let override_flags = (
+    $preceding_words
     | enumerate
     | where item == "--override-input"
-    | get index
-    | last
-    | default null
   )
 
-  if $flag_index == null {
-    let current = ($spans | last | default "")
-    let before_current = if $current == "" {
-      ($spans | skip 1 | drop)
-    } else {
-      ($spans | skip 1 | drop 1)
-    }
-    let should_complete_action = (($before_current | length) == 1) or (($before_current | is-empty) and ($current != ""))
-    if $should_complete_action {
+  if ($override_flags | is-empty) {
+    let positional_words = ($preceding_words | skip 1)
+    let after_host = (($positional_words | length) == 1)
+    let typing_action_first = ($positional_words | is-empty) and ($current != "")
+    if $after_host or $typing_action_first {
       return (complete-nixos-rebuild-actions $current)
     }
     return null
   }
 
-  let values = ($spans | skip ($flag_index + 1))
-  let current = ($values | last | default "")
-  let completed_values = if $current == "" {
-    ($values | drop)
+  let flag_index = ($override_flags | last | get index)
+  let completed_values = ($preceding_words | skip ($flag_index + 1))
+  # Each pair is an input name followed by a URL: even positions expect names.
+  let expects_input_name = (($completed_values | length) mod 2) == 0
+  if $expects_input_name {
+    complete-nixos-input-name | where $it starts-with $current
   } else {
-    ($values | drop 1)
+    complete-local-flake-path $current
   }
-
-  if (($completed_values | length) mod 2) == 0 {
-    let inputs = (complete-nixos-input-name)
-    if $current == "" {
-      return $inputs
-    }
-    return ($inputs | where $it starts-with $current)
-  }
-
-  if not ($current | str starts-with "path:") {
-    return null
-  }
-
-  let partial_path = ($current | str substring 5..)
-  let matches = (glob --no-file $"($partial_path)*")
-
-  $matches | each {|match| $"path:($match)" }
 }
 
 export def complete-wipe-older-than [] {

@@ -15,6 +15,62 @@ def ensure-action [action: string] {
   }
 }
 
+# Nushell collects all positional arguments together, even after a switch flag.
+# Consume the optional host/action prefix; the remainder belongs to input overrides.
+def parse-rebuild-request [
+  command_args: list<string>
+  override_input: bool
+] {
+  let defaults = { host: (host-name), action: "test", override_values: [] }
+  if ($command_args | is-empty) {
+    return $defaults
+  }
+
+  let first = ($command_args | first)
+  let remaining = ($command_args | skip 1)
+  let second = ($remaining | get 0?)
+
+  if $first in $nixos_rebuild_actions {
+    return ($defaults | merge { action: $first, override_values: $remaining })
+  }
+
+  if $second in $nixos_rebuild_actions {
+    return ($defaults | merge {
+      host: $first
+      action: $second
+      override_values: ($remaining | skip 1)
+    })
+  }
+
+  # Input names distinguish an override-only invocation from a host prefix.
+  if $override_input {
+    let known_inputs = (complete-nixos-input-name)
+    if $first in $known_inputs {
+      return ($defaults | merge { override_values: $command_args })
+    }
+    return ($defaults | merge { host: $first, override_values: $remaining })
+  }
+
+  if not ($remaining | is-empty) {
+    error make { msg: "Usage: nrb [host] [action] [--override-input input-name flake-URL ...]" }
+  }
+  $defaults | merge { host: $first }
+}
+
+# Resolve the default pair and validate before constructing nixos-rebuild's argv.
+def resolve-input-overrides [enabled: bool, values: list<string>] {
+  if not $enabled {
+    return []
+  }
+  if ($values | is-empty) {
+    return [dotfiles path:/configs/my-dotfiles]
+  }
+  if (($values | length) mod 2) != 0 {
+    error make { msg: "--override-input expects input-name/flake-URL pairs, for example: --override-input dotfiles path:/tmp/dotfiles nixpkgs path:/tmp/nixpkgs" }
+  }
+  $values
+}
+
 def rebuild-args [
   action: string
   flake_ref: string
@@ -24,20 +80,8 @@ def rebuild-args [
   # warn about unless this deprecated feature is explicitly allowed.
   mut args = [$action --flake $flake_ref --option extra-deprecated-features or-as-identifier]
 
-  let input_overrides = if not $options.override_input {
-    []
-  } else if ($options.override_input_values | is-empty) {
-    [dotfiles path:/configs/my-dotfiles]
-  } else {
-    $options.override_input_values
-  }
-
-  if (($input_overrides | length) mod 2) != 0 {
-    error make { msg: "--override-input expects input-name/flake-URL pairs, for example: --override-input dotfiles path:/tmp/dotfiles nixpkgs path:/tmp/nixpkgs" }
-  }
-
-  for override in ($input_overrides | chunks 2) {
-    $args = ($args | append [--override-input ...$override])
+  for pair in ($options.input_overrides | chunks 2) {
+    $args = ($args | append [--override-input ...$pair])
   }
 
   if $options.specialisation != null {
@@ -164,78 +208,30 @@ export def nrb [
   --use-remote-sudo # Ask nixos-rebuild to use sudo on the target host.
   --fast # Pass --fast to nixos-rebuild.
   --accept-flake-config # Accept flake configuration prompts.
-  --override-input # Add input-name/flake-URL pairs after this flag; defaults to the local dotfiles checkout when omitted.
+  --override-input # Override input-name/flake-URL pairs; no pairs uses the local dotfiles checkout.
   --impure # Pass --impure to nixos-rebuild.
   --no-nom # Do not pipe internal-json logs through nom.
   --verbose (-V) # Pass -v to nixos-rebuild when piping logs through nom.
   --dry-run (-n) # Print the command without running it.
 ] {
-  let known_inputs = (complete-nixos-input-name)
-  mut target = ""
-  mut action = ""
-  mut override_input_values = []
-
-  if ($command_args | length) > 0 {
-    let first = ($command_args | first)
-    let rest = ($command_args | skip 1)
-
-    if $first in $nixos_rebuild_actions {
-      $action = $first
-      $override_input_values = $rest
-    } else if ($command_args | length) > 1 {
-      let second = ($command_args | get 1)
-      if $second in $nixos_rebuild_actions {
-        $target = $first
-        $action = $second
-        $override_input_values = ($command_args | skip 2)
-      } else if $override_input and $first in $known_inputs {
-        $override_input_values = $command_args
-      } else if $override_input and $second in $known_inputs {
-        $target = $first
-        $override_input_values = $rest
-      } else if $override_input {
-        $target = $first
-        $override_input_values = $rest
-      } else {
-        error make { msg: "Usage: nrb [host] [action] [--override-input input-name flake-URL ...]" }
-      }
-    } else if $override_input and $first in $known_inputs {
-      $override_input_values = $command_args
-    } else {
-      $target = $first
-    }
-  }
-
-  let current_host = (host-name)
-  let host = if $target == "" {
-    $current_host
-  } else if $target in $nixos_rebuild_actions {
-    if $action == "" { $current_host } else { $action }
-  } else {
-    $target
-  }
-  let resolved_action = if $target in $nixos_rebuild_actions {
-    $target
-  } else if $action == "" {
-    "test"
-  } else {
-    $action
-  }
-  ensure-action $resolved_action
+  let request = (parse-rebuild-request $command_args $override_input)
+  let host = $request.host
+  let action = $request.action
+  ensure-action $action
+  let input_overrides = (resolve-input-overrides $override_input $request.override_values)
 
   let flake_ref = $"($flake)#($host)"
-  let args = (rebuild-args $resolved_action $flake_ref {
+  let args = (rebuild-args $action $flake_ref {
     specialisation: $specialisation
     build_host: $build_host
     target_host: $target_host
     use_remote_sudo: $use_remote_sudo
     fast: $fast
     accept_flake_config: $accept_flake_config
-    override_input: $override_input
-    override_input_values: $override_input_values
+    input_overrides: $input_overrides
     impure: $impure
   })
-  let use_sudo = ($resolved_action not-in [build dry-build])
+  let use_sudo = ($action not-in [build dry-build])
   let use_nom = ((not $no_nom) and (have-command nom))
   let runner = if $use_sudo { "sudo nixos-rebuild" } else { "nixos-rebuild" }
 

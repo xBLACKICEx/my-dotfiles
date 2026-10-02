@@ -61,6 +61,22 @@ nrb laptop switch --flake /configs/nix-config
 nrb HOST_NAME build --dry-run --no-nom
 ```
 
+临时覆盖 flake input（不带 `--override-input` 时使用原来的锁定 input）：
+
+```nu
+# 只带开关：使用 /configs/my-dotfiles 覆盖 dotfiles
+nrb HOST_NAME build --override-input
+
+# 显式指定一组或多组 input 名称和 flake URL
+nrb HOST_NAME build --override-input dotfiles path:/tmp/dotfiles nixpkgs path:/tmp/nixpkgs
+
+# host 和 action 均可省略，仍使用当前 hostname 和 test
+nrb --override-input dotfiles path:/tmp/dotfiles
+```
+
+`--override-input` 后会补全 input 名称；下一项以 `path:` 开头时会补全本地目录。
+每个 input 都需要对应一个 URL。
+
 使用 specialisation：
 
 ```nu
